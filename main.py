@@ -66,6 +66,22 @@ async def skip(ctx):
 
 
 @ds_client.command()
+async def search(ctx):
+    if ym_client.search(ctx.message.content[8::])['tracks'] is None:
+        await ctx.send("Can't find anything. Уебись об стену и попробуй ещё раз.")
+        return
+    track_list = ym_client.search(ctx.message.content[8::])['tracks']['results']
+    msg = ''
+    n = 5 if len(track_list) > 5 else len(track_list)
+    for i in range(n):
+        track = track_list[i]
+        title = track['title']
+        artist = track['artists'][0]['name']
+        msg += str(i + 1) + f'. **{artist}** - **{title}** \n'
+    await ctx.send(msg)
+
+
+@ds_client.command()
 async def play(ctx):
     author = ctx.message.author
 
@@ -81,8 +97,15 @@ async def play(ctx):
 
 
 async def parse_message_and_fill_queue(ctx):
+    if 'music.yandex.ru' not in ctx.message.content.split(' ')[1]:
+        request = ctx.message.content[6::]
+        track = ym_client.search(ctx.message.content[8::])['tracks']['results'][0]
+        if track is None:
+            await ctx.send("Can't find any tracks.")
+            return
+        await add_track_to_queue(track)
 
-    if 'playlist' in ctx.message.content.split(' ')[1]:
+    elif 'playlist' in ctx.message.content.split(' ')[1]:
         ymlink = ctx.message.content.split(' ')[1]
         user_id = ymlink.split('users/')[1].split('/playlists')[0]
         playlist_id = ymlink.split('playlists/')[1]
@@ -123,6 +146,9 @@ async def parse_message_and_fill_queue(ctx):
 
 
 async def next_track(ctx):
+    vc = None
+    if len(ds_client.voice_clients) == 0:
+        return
     vc = ds_client.voice_clients[0]
     global music_queue
     if music_queue.empty():
@@ -137,6 +163,13 @@ async def next_track(ctx):
         vc.play(source, after=lambda e: run(next_track(ctx)))
     else:
         vc.play(source, after=lambda e: run(next_track(ctx)))
+
+
+async def add_track_to_queue(track):
+    track_id = f'{track["id"]}:{track["albums"][0]["id"]}'
+    link, track_info = await get_track_info(track_id)
+    source = FFmpegPCMAudio(link, **ffmpeg_options, executable=config.ffmpeg)
+    music_queue.put([source, track_info])
 
 
 async def get_track_info(track_id: str):
