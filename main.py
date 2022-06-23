@@ -81,8 +81,7 @@ async def play(ctx):
 
 
 async def parse_message_and_fill_queue(ctx):
-    ymlink = None
-    link, track_info = None, None
+
     if 'playlist' in ctx.message.content.split(' ')[1]:
         ymlink = ctx.message.content.split(' ')[1]
         user_id = ymlink.split('users/')[1].split('/playlists')[0]
