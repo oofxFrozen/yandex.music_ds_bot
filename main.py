@@ -1,5 +1,5 @@
-import queue
-
+import yandex_music
+from queue import Queue
 from yandex_music import Client
 from discord.ext import commands
 from hashlib import md5
@@ -20,8 +20,8 @@ ffmpeg_options = {
 }
 
 voice = None
-vc = None
-music_queue = queue.Queue(maxsize=0)
+music_queue = Queue(maxsize=0)
+current_track: yandex_music.Track = None
 
 
 @ds_client.command()
@@ -40,6 +40,9 @@ async def vc_connect(ctx):
 
 @ds_client.command()
 async def pause(ctx):
+    if len(ds_client.voice_clients) == 0:
+        return
+
     vc = ds_client.voice_clients[0]
     if vc is None or not vc.is_connected() or not vc.is_playing():
         return
@@ -49,6 +52,9 @@ async def pause(ctx):
 
 @ds_client.command()
 async def resume(ctx):
+    if len(ds_client.voice_clients) == 0:
+        return
+
     vc = ds_client.voice_clients[0]
     if vc is None or not vc.is_connected() or vc.is_playing():
         return
@@ -57,9 +63,76 @@ async def resume(ctx):
 
 
 @ds_client.command()
+async def queue(ctx):
+    if len(ds_client.voice_clients) == 0:
+        return
+
+    global music_queue
+    global current_track
+    mqueue = music_queue.queue
+    msg = ''
+    if current_track is None:
+        await ctx.send('Queue is empty')
+        return
+    msg += f'1. **{current_track.artists[0].name}** - **{current_track.title}** [Playing now] \n'
+    if len(mqueue) > 4:
+        for i in range(4):
+            track_info = mqueue[i][1]
+            msg += str(i + 2) + f'. **{track_info.artists[0].name}** - **{track_info.title}** \n'
+    else:
+        for i in range(len(mqueue)):
+            track_info = mqueue[i][1]
+            msg += str(i + 2) + f'. **{track_info.artists[0].name}** - **{track_info.title}** \n'
+    await ctx.send(msg)
+
+
+@ds_client.command()
+async def q(ctx):
+    if len(ds_client.voice_clients) == 0:
+        return
+
+    global music_queue
+    global current_track
+    mqueue = music_queue.queue
+    msg = ''
+    if current_track is None:
+        await ctx.send('Queue is empty')
+        return
+    msg += f'1. **{current_track.artists[0].name}** - **{current_track.title}** [Playing now] \n'
+    if len(mqueue) > 4:
+        for i in range(4):
+            track_info = mqueue[i][1]
+            msg += str(i + 2) + f'. **{track_info.artists[0].name}** - **{track_info.title}** \n'
+    else:
+        for i in range(len(mqueue)):
+            track_info = mqueue[i][1]
+            msg += str(i + 2) + f'. **{track_info.artists[0].name}** - **{track_info.title}** \n'
+    await ctx.send(msg)
+
+
+@ds_client.command()
 async def skip(ctx):
+    if len(ds_client.voice_clients) == 0:
+        return
+    global current_track
+    global music_queue
+    if current_track is None:
+        await ctx.send('Queue is already empty')
+        return
     vc = ds_client.voice_clients[0]
-    if vc is None or not vc.is_connected() or not vc.is_playing():
+    if 'all' in ctx.message.content:
+        music_queue = Queue(maxsize=0)
+        vc.stop()
+        await ctx.send('Skipped all tracks')
+        return
+    if len(ctx.message.content) > 5:
+        mqueue = music_queue.queue
+        message = ctx.message.content
+        n = min(int(message[6::]), len(mqueue) + 1)
+        for i in range(n - 1):
+            music_queue.get()
+        vc.stop()
+        await ctx.send(f'Skipped {n} tracks')
         return
     await ctx.send('Skipped')
     vc.stop()
@@ -87,19 +160,18 @@ async def play(ctx):
 
     await parse_message_and_fill_queue(ctx)
 
-    global vc
-    if vc is None or not vc.is_connected():
+    vc = None
+    if len(ds_client.voice_clients) == 0:
         vc = await author.voice.channel.connect()
+    vc = ds_client.voice_clients[0]
+    if not vc.is_playing():
         await next_track(ctx)
-    else:
-        if not vc.is_playing():
-            await next_track(ctx)
 
 
 async def parse_message_and_fill_queue(ctx):
     if 'music.yandex.ru' not in ctx.message.content.split(' ')[1]:
-        request = ctx.message.content[6::]
-        track = ym_client.search(ctx.message.content[8::])['tracks']['results'][0]
+        request = ctx.message.content[8::]
+        track = ym_client.search(request)['tracks']['results'][0]
         if track is None:
             await ctx.send("Can't find any tracks.")
             return
@@ -111,13 +183,9 @@ async def parse_message_and_fill_queue(ctx):
         playlist_id = ymlink.split('playlists/')[1]
         playlist_info = ym_client.users_playlists(playlist_id, user_id=user_id)
         track_list = playlist_info['tracks']
-        for track in track_list:
-            track_id = f'{track["id"]}:{track["track"]["albums"][0]["id"]}'
-            link, track_info = await get_track_info(track_id)
-            source = FFmpegPCMAudio(link, **ffmpeg_options, executable=config.ffmpeg)
-            music_queue.put([source, track_info])
         await ctx.send(
             f'Successfully added *{playlist_info.track_count}* tracks from **{playlist_info.title}** *playlist* by **{playlist_info.owner.name}** to the queue.')
+        await add_playlist_to_queue(ctx, track_list)
 
     elif 'track' in ctx.message.content.split(' ')[1]:
         ymlink = ctx.message.content.split(' ')[1]
@@ -136,13 +204,10 @@ async def parse_message_and_fill_queue(ctx):
         album_id = ymlink.split('album/')[1]
         track_list = ym_client.albums_with_tracks(album_id).volumes[0]
         album_info = ym_client.albums(album_id)[0]
-        for track in track_list:
-            track_id = f'{track["id"]}:{album_id}'
-            link, track_info = await get_track_info(track_id)
-            source = FFmpegPCMAudio(link, **ffmpeg_options, executable=config.ffmpeg)
-            music_queue.put([source, track_info])
+
         await ctx.send(
             f'Successfully added *{album_info.track_count}* tracks from **{album_info.title}** *album* by **{album_info.artists[0].name}** to the queue.')
+        await add_album_to_queue(ctx, track_list, album_id)
 
 
 async def next_track(ctx):
@@ -151,12 +216,15 @@ async def next_track(ctx):
         return
     vc = ds_client.voice_clients[0]
     global music_queue
+    global current_track
     if music_queue.empty():
+        current_track = None
         return
     author = ctx.message.author
     track = music_queue.get()
     source = track[0]
     track_info = track[1]
+    current_track = track_info
     source.read()
     if vc is None or not vc.is_connected():
         vc = author.voice.channel.connect()
@@ -170,6 +238,48 @@ async def add_track_to_queue(track):
     link, track_info = await get_track_info(track_id)
     source = FFmpegPCMAudio(link, **ffmpeg_options, executable=config.ffmpeg)
     music_queue.put([source, track_info])
+
+
+async def add_playlist_to_queue(ctx, track_list):
+    first = track_list[0]
+    first_id = f'{first["id"]}:{first["track"]["albums"][0]["id"]}'
+    link, track_info = await get_track_info(first_id)
+    source = FFmpegPCMAudio(link, **ffmpeg_options, executable=config.ffmpeg)
+    music_queue.put([source, track_info])
+    vc = None
+    if len(ds_client.voice_clients) == 0:
+        vc = await ctx.message.author.voice.channel.connect()
+    vc = ds_client.voice_clients[0]
+    if not vc.is_playing():
+        await next_track(ctx)
+
+    for i in range(1, len(track_list)):
+        track = track_list[i]
+        track_id = f'{track["id"]}:{track["track"]["albums"][0]["id"]}'
+        link, track_info = await get_track_info(track_id)
+        source = FFmpegPCMAudio(link, **ffmpeg_options, executable=config.ffmpeg)
+        music_queue.put([source, track_info])
+
+
+async def add_album_to_queue(ctx, track_list, album_id):
+    first = track_list[0]
+    first_id = f'{first["id"]}:{album_id}'
+    link, track_info = await get_track_info(first_id)
+    source = FFmpegPCMAudio(link, **ffmpeg_options, executable=config.ffmpeg)
+    music_queue.put([source, track_info])
+    vc = None
+    if len(ds_client.voice_clients) == 0:
+        vc = await ctx.message.author.voice.channel.connect()
+    vc = ds_client.voice_clients[0]
+    if not vc.is_playing():
+        await next_track(ctx)
+
+    for i in range(1, len(track_list)):
+        track = track_list[i]
+        track_id = f'{track["id"]}:{album_id}'
+        link, track_info = await get_track_info(track_id)
+        source = FFmpegPCMAudio(link, **ffmpeg_options, executable=config.ffmpeg)
+        music_queue.put([source, track_info])
 
 
 async def get_track_info(track_id: str):
