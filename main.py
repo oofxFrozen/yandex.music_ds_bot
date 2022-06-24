@@ -75,14 +75,12 @@ async def queue(ctx):
         await ctx.send('Queue is empty')
         return
     msg += f'1. **{current_track.artists[0].name}** - **{current_track.title}** [Playing now] \n'
+    n = min(4, len(mqueue))
     if len(mqueue) > 4:
-        for i in range(4):
+        for i in range(n):
             track_info = mqueue[i][1]
             msg += str(i + 2) + f'. **{track_info.artists[0].name}** - **{track_info.title}** \n'
-    else:
-        for i in range(len(mqueue)):
-            track_info = mqueue[i][1]
-            msg += str(i + 2) + f'. **{track_info.artists[0].name}** - **{track_info.title}** \n'
+    msg += f'... and {len(mqueue) - 4} more tracks' if len(mqueue) > 4 else ""
     await ctx.send(msg)
 
 
@@ -99,14 +97,12 @@ async def q(ctx):
         await ctx.send('Queue is empty')
         return
     msg += f'1. **{current_track.artists[0].name}** - **{current_track.title}** [Playing now] \n'
+    n = min(4, len(mqueue))
     if len(mqueue) > 4:
-        for i in range(4):
+        for i in range(n):
             track_info = mqueue[i][1]
             msg += str(i + 2) + f'. **{track_info.artists[0].name}** - **{track_info.title}** \n'
-    else:
-        for i in range(len(mqueue)):
-            track_info = mqueue[i][1]
-            msg += str(i + 2) + f'. **{track_info.artists[0].name}** - **{track_info.title}** \n'
+    msg += f'... and {len(mqueue) - 4} more tracks' if len(mqueue) > 4 else ""
     await ctx.send(msg)
 
 
@@ -170,7 +166,7 @@ async def play(ctx):
 
 async def parse_message_and_fill_queue(ctx):
     if 'music.yandex.ru' not in ctx.message.content.split(' ')[1]:
-        request = ctx.message.content[8::]
+        request = ctx.message.content[6::]
         track = ym_client.search(request)['tracks']['results'][0]
         if track is None:
             await ctx.send("Can't find any tracks.")
