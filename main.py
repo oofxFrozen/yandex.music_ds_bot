@@ -141,7 +141,7 @@ async def search(ctx):
         return
     track_list = ym_client.search(ctx.message.content[8::])['tracks']['results']
     msg = ''
-    n = 5 if len(track_list) > 5 else len(track_list)
+    n = min(5, len(track_list))
     for i in range(n):
         track = track_list[i]
         title = track['title']
@@ -167,10 +167,10 @@ async def play(ctx):
 async def parse_message_and_fill_queue(ctx):
     if 'music.yandex.ru' not in ctx.message.content.split(' ')[1]:
         request = ctx.message.content[6::]
-        track = ym_client.search(request)['tracks']['results'][0]
-        if track is None:
+        if ym_client.search(request)['tracks'] is None:
             await ctx.send("Can't find any tracks.")
             return
+        track = ym_client.search(request)['tracks']['results'][0]
         await add_track_to_queue(track)
 
     elif 'playlist' in ctx.message.content.split(' ')[1]:
